@@ -1,0 +1,5 @@
+configobj==5.0.8
+keyboard==0.13.5
+pyperclip==1.8.2
+pywin32==306
+Requests==2.31.0
