@@ -1,30 +1,32 @@
-import requests
 import json
-import configobj
 import time
+
+import configobj
 import keyboard
-import win32gui
+import pyperclip
+import requests
 import win32api
-
-
-def input(print_str: str = '') -> str:
-    print(print_str)
-    return_str = ''
-    while True:
-        match get_keyboard():
-            case 'enter':
-                return return_str
-            case 'backspace':
-                return_str = return_str[:-1]
-            case _ as entered_str:
-                return_str += entered_str
-        print(return_str)
+import win32gui
 
 
 def _main() -> None:
+    global input
     if not config.get('cookie'):
-        config['cookie'] = input('Please enter the cookies of pan.baidu.com.')
+        config['cookie'] = input("Enter your Cookie of the API.")
         config.write()
+
+    def input(print_str: str = '') -> str:
+        print(print_str)
+        return_str = ''
+        while True:
+            match get_keyboard():
+                case 'enter':
+                    return return_str
+                case 'backspace':
+                    return_str = return_str[:-1]
+                case _ as entered_str:
+                    return_str += entered_str
+            print(return_str)
 
     share_list = print_list(get_list(), root=True)
     while True:
@@ -39,7 +41,10 @@ def _main() -> None:
             continue
         break
 
-    print('\n'.join(share_file_ids))
+    output = '\n'.join(share_file_ids)
+    print(output)
+    pyperclip.copy(output)
+    print('Copied to the clipboard.')
 
     print('Press esc to exit.')
     while get_keyboard() != 'esc':
@@ -69,9 +74,9 @@ def errno_handle(errno_code: int) -> None:
         case -6:
             del config['cookie']
             config.write()
-            raise 'Error: Invalid user. Try to get cookies by logging in on pan.baidu.com again'
+            raise Exception('Error: Invalid user. Try to get cookie of the API by logging in again')
         case _ as error_code:
-            raise f'Error: Unknown: {error_code}'
+            raise Exception(f'Error: Unknown: {error_code}')
 
 
 def url_get(url: str) -> requests.Response:
@@ -97,25 +102,25 @@ def print_list(list: list[dict], root: bool = False) -> set[int]:
             '\n'.join(
                 map(
                     lambda a: (
-                        (
                             (
-                                '8' if pointer == list.index(a) else '√'
-                            )
-                            if a['fs_id'] in return_ids else
-                            (
-                                'o' if pointer == list.index(a) else ' '
-                            )
-                        ) +
-                        ' ' +
-                        a['server_filename'] +
-                        ' - ' +
-                        ('DIR' if a['isdir'] else 'FIL')
+                                (
+                                    '8' if pointer == list.index(a) else '√'
+                                )
+                                if a['fs_id'] in return_ids else
+                                (
+                                    'o' if pointer == list.index(a) else ' '
+                                )
+                            ) +
+                            ' ' +
+                            a['server_filename'] +
+                            ' - ' +
+                            ('DIR' if a['isdir'] else 'FIL')
                     ),
                     list
                 )
             ),
             f'\n---------------------------------\nPress  up/down  to choose\n       s           select\n       enter '
-            f'      go into the dir\n       backspace   {"share" if root else"go back"}'
+            f'      go into the dir\n       backspace   {"share" if root else "go back"}'
         )
 
     pointer = 0
@@ -152,9 +157,9 @@ def print_list(list: list[dict], root: bool = False) -> set[int]:
                     time.sleep(ui_sleep_time)
                     continue
                 return_ids = return_ids | \
-                    print_list(
-                        list_got_entered
-                    )
+                             print_list(
+                                 list_got_entered
+                             )
             case 'backspace':
                 return return_ids
 
@@ -201,8 +206,7 @@ def share(fid_list: set, password: str, encrypt: bool = False) -> set[str]:
 
 
 if __name__ == '__main__':
+    win32api.SetConsoleTitle('BaidudiskSharer')
     ui_sleep_time = 0.5
     config = configobj.ConfigObj('config.ini', encoding='utf-8')
     _main()
-
-# https://pan.baidu.com/share/set?schannel=4&fid_list=%5B{fid}%5D&pwd={pwd}
