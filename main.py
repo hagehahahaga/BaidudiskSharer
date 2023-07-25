@@ -31,9 +31,10 @@ def _main() -> None:
     share_list = print_list(get_list(), root=True)
     while True:
         try:
+            password = input('Input the password(Length: 4. Only nums and alphabets).')
             share_file_ids = share(
                 share_list,
-                input('Input the password(Length: 4. Only nums and alphabets).'),
+                password,
                 bool(input('Encrypt?(Enter for false, else for true.)'))
             )
         except AssertionError as error:
@@ -41,7 +42,7 @@ def _main() -> None:
             continue
         break
 
-    output = '\n'.join(share_file_ids)
+    output = '\n'.join(share_file_ids) + f'\nPassword: {password}'
     print(output)
     pyperclip.copy(output)
     print('Copied to the clipboard.')
