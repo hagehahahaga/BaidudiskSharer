@@ -97,7 +97,7 @@ def url_get(url: str) -> requests.Response:
 
 
 def print_list(list: list[dict], root: bool = False) -> set[int]:
-    def flush():
+    def flush() -> None:
         print(
             '\n\n---------------------------------\n\n',
             '\n'.join(
@@ -120,8 +120,8 @@ def print_list(list: list[dict], root: bool = False) -> set[int]:
                     list
                 )
             ),
-            f'\n---------------------------------\nPress  up/down  to choose\n       s           select\n       enter '
-            f'      go into the dir\n       backspace   {"share" if root else "go back"}'
+            f'\n---------------------------------\nPress  up/down  to choose\n       s           select\n       a     '
+            f'      select all\n       enter       go into the dir\n       backspace   {"share" if root else "go back"}'
         )
 
     pointer = 0
@@ -131,8 +131,11 @@ def print_list(list: list[dict], root: bool = False) -> set[int]:
     # 分享时用到的id: fs_id
     # 是否是目录: isdir
     # 文件(夹)绝对路径: path
+    fls = True
     while True:
-        flush()
+        if fls:
+            flush()
+        fls = True
         match get_keyboard():
             case 'up':
                 if pointer > 0:
@@ -146,6 +149,12 @@ def print_list(list: list[dict], root: bool = False) -> set[int]:
                     return_ids.remove(pointer_file_fs_id)
                     continue
                 return_ids.add(pointer_file_fs_id)
+            case 'a':
+                list_fs_ids = set(map(lambda a: a['fs_id'], list))
+                if len(list) <= len(return_ids) and not list_fs_ids - return_ids:
+                    return_ids -= list_fs_ids
+                    continue
+                return_ids = return_ids | list_fs_ids
             case 'enter':
                 pointer_file = list[pointer]
                 if not pointer_file['isdir']:
@@ -163,6 +172,9 @@ def print_list(list: list[dict], root: bool = False) -> set[int]:
                              )
             case 'backspace':
                 return return_ids
+            case _:
+                fls = False
+
 
 
 def get_keyboard() -> str:
