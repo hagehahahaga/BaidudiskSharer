@@ -6,6 +6,7 @@ import keyboard
 import pyperclip
 import win32api
 import win32gui
+import os
 
 usable = ('netdisksharer', 'baidunetdisk', 'quarkclouddrive')
 name_dict = {
@@ -14,27 +15,46 @@ name_dict = {
 }
 
 
-class Config:
+class NetDiskAPIError(Exception):
+    brand: str
+
+    def __init__(self, message: str, method):
+        super().__init__(message)
+        self.method = method
+
+    def error_show(self, brand: str):
+        self.brand = brand
+        print(f'Error on {self.brand}: {self.method.__name__}. ', end='')
+        print(self)
+        self.method(self)
+
+    def invalid_user(self):
+        config[self.brand] = input(f'Enter the cookie of the website {self.brand}:\n')
+
+    def unknown(self):
+        input('Press enter to retry.')
+
+
+class Config(dict):
+    """
+    You can use it like a dict naturally by with it as an object
+    """
     def __init__(self, file: str) -> None:
         self.file = file
 
-    def __getitem__(self, item):
-        return self.data.__getitem__(item)
+        if not os.path.exists(self.file):
+            super().__init__()
+            return
 
-    def __setitem__(self, key, value) -> None:
-        self.data.__setitem__(key, value)
-
-    def __delitem__(self, key) -> None:
-        self.data.__delitem__(key)
+        with open(self.file, mode='r') as file:
+            super().__init__(json.load(file))
 
     def __enter__(self):
-        with open(self.file, mode='r') as file:
-            self.data: dict | list = json.load(file)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:
         with open(self.file, mode='w') as file:
-            json.dump(self.data, file, indent=2)
+            json.dump(self, file, indent=2)
 
 
 class NetDir:
@@ -82,11 +102,11 @@ class NetDir:
         }
         self.path = object.get(path_dict[self.brand])
 
-        name_dict = {
+        file_name_dict = {
             'baidunetdisk': 'server_filename',
             'quarkclouddrive': 'file_name'
         }
-        self.name = object.get(name_dict[self.brand])
+        self.name = object.get(file_name_dict[self.brand])
 
     def get_list(self) -> list:
         if self._list:
@@ -150,52 +170,55 @@ def url_request(url: str, params: dict, brand: str, mode: str = 'get', json_data
             url,
             params=params,
             headers={
-                'Cookie': config[brand]
+                'Cookie': config.get(brand)
             },
             json=json_data
         )
-        match response.status_code:
-            case 200:
-                break
-            case _ as error_code:
-                with open('error.txt', mode='a') as file:
-                    file.write(f'\nError: {error_code}')
-                print(f'Error: {error_code}. Press enter to retry.')
-    response = json.loads(response.text)
+        if response.status_code != 200:
+            print(f'Error: {response.status_code}. Press enter to retry.')
+            continue
+        response = json.loads(response.text)
 
-    error_handle_dict = {
-        'baidunetdisk': {
-            'status_code': ['errno'],
-            0: 'pass',
-            -6: 'Invalid user'
-        },
-        'quarkclouddrive': {
-            'status_code': ['code'],
-            0: 'pass',
-            31001: 'Invalid user'
+        error_handle_dict = {
+            'baidunetdisk': {
+                'status_code_path': ['errno'],
+                0: 'pass',
+                -6: NetDiskAPIError.invalid_user
+            },
+            'quarkclouddrive': {
+                'status_code_path': ['code'],
+                0: 'pass',
+                31001: NetDiskAPIError.invalid_user
+            }
         }
-    }
 
-    error_code = response
-    for steps in error_handle_dict[brand]['status_code']:
-        error_code = error_code[steps]
+        error_code = response
+        for steps in error_handle_dict[brand]['status_code_path']:
+            error_code = error_code[steps]
 
-    match error_handle_dict[brand].get(error_code):
-        case 'pass':
+        error_message_dict = {
+            NetDiskAPIError.invalid_user: f'Try to get the cookie of {name_dict[brand]} by logging in again.',
+            NetDiskAPIError.unknown: 'Maybe try again will work?'
+        }
+
+        try:
+            if (error := error_handle_dict[brand][error_code]) != 'pass':
+                raise NetDiskAPIError(error_message_dict[error], error)
+        except KeyError:
+            NetDiskAPIError(f'Maybe try again will work?', NetDiskAPIError.unknown).error_show(brand)
+        except NetDiskAPIError as error:
+            error.error_show(brand)
+            continue
+        else:
             time.sleep(ui_sleep_time)
-        case 'Invalid user':
-            raise Exception(f'Error on {name_dict[brand]}: Invalid user. Try to get cookie of the API by logging in '
-                            f'again')
-        case None:
-            raise Exception(f'Error on {name_dict[brand]}: Unknown: {error_code}')
 
-    return response
+        return response
 
 
 def show(dir_to_show: NetDir) -> set[NetDir, NetFile]:
     def flush() -> None:
         print(
-            '\n\n---------------------------------\n\n',
+            '\n\n---------------------------------\n\n' +
             '\n'.join(
                 map(
                     lambda a: (
@@ -372,7 +395,7 @@ def share(objects_grouped: dict[str: set[NetDir | NetFile]], password: str) -> s
     return return_set
 
 
-def _main() -> None:
+def __main() -> None:
     def input(print_str: str = '') -> str:
         print(print_str)
         return_str = ''
@@ -403,6 +426,9 @@ def _main() -> None:
         )
     )
 
+    if not share_dict:
+        exit()
+
     share_file_ids = set()
     password = ''
     while True:
@@ -431,4 +457,4 @@ if __name__ == '__main__':
     win32api.SetConsoleTitle('BaidudiskSharer')
     ui_sleep_time = 0.5
     with Config('config.json') as config:
-        _main()
+        __main()
