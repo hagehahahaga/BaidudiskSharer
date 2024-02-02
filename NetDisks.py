@@ -1,15 +1,15 @@
 import json
 import requests
+import time
 
 import Base
-import Config
 
 
 class BaseNetDisk:
     """
     The CONSTS need to be set in subclasses and depend on their brand.
     """
-    id: int
+    id: str
     path: str
     name: str
     is_dir: bool
@@ -17,6 +17,7 @@ class BaseNetDisk:
 
     BRAND: str
     SELECTABLE = True
+    RETRY_TIMES = 0
 
     __GET_ID_PATH: list[str]
     __GET_PATH_PATH: list[str]
@@ -40,9 +41,11 @@ class BaseNetDisk:
     object_list: set
     items = set()
     selected = False
+    session = requests.session()
+    retry_times: int  # DO NOT CONFUSE it with RETRY_TIMES
 
     def __init__(self, object: Base.Tree):
-        ...
+        assert self.RETRY_TIMES > -1, 'RETRY TIMES can not be under 0.'
 
     def get_items_step0(self) -> None:
         self.object_list = self.url_request(
@@ -153,36 +156,42 @@ class BaseNetDisk:
 
     def url_request(self, url: str, params: dict, mode: str = 'get', json_data: dict = None) -> Base.Tree:
         assert mode in ('get', 'post'), f'{mode.capitalize()} is not supported'
+        self.retry_times = self.RETRY_TIMES
         while True:
-            with Config.Config('config.json') as config:
-                response = eval(f'requests.{mode}')(
+            if self.retry_times == -1:
+                return Base.Tree()
+            with Base.Config('config.json') as config:
+                response = eval(f'self.session.{mode}')(
                     url,
                     params=params,
-                    headers={
-                        'Cookie': config.get(self.BRAND)
-                    },
+                    headers=config[self.BRAND]["headers"],
                     json=json_data
                 )
             response = Base.Tree(json.loads(response.text))
 
-            error_code = response.get_by_path(self.STATUS_CODE_PATH)
+            error_code = response.get_by_path(self.STATUS_CODE_PATH, None)
 
             error_message_dict = {
-                Base.NetDiskAPIError.invalid_user: f'Try to get the cookie of {self.BRAND} by logining again.',
+                Base.NetDiskAPIError.invalid_user: f'Try to get the cookie by logining again.',
+                Base.NetDiskAPIError.shared_too_much: "Put them off util the next day.",
                 Base.NetDiskAPIError.unknown: 'Maybe try again will work?'
             }
 
             try:
                 if (error := self.STATUS_CODE_HANDLE_DICT[error_code]) != 'pass':
+                    if self.retry_times:
+                        self.retry_times -= 1
+                        time.sleep(1)
+                        continue
                     raise Base.NetDiskAPIError(error_message_dict[error], error)
             except KeyError:
                 Base.NetDiskAPIError(
                     f'Maybe try again will work?',
                     Base.NetDiskAPIError.unknown
-                ).error_show(self.BRAND)
+                ).error_show(self)
                 continue
             except Base.NetDiskAPIError as error:
-                error.error_show(self.BRAND)
+                error.error_show(self)
                 continue
 
             return response
@@ -226,24 +235,24 @@ class BaseNetDiskRoot(BaseNetDisk):
         return set()
 
     def share(self, password: str) -> str:
-        assert len(password) == 4, 'Error: the length of the password must be 4'
-        assert password.isalnum(), 'Error: the allowed are alphabets and numbers'
-
-        self.SHARE_PARAMS.set_by_path(self.SHARE_PASSWORD_PATH, password)
-        self.SHARE_PARAMS.set_by_path(self.SHARE_ITEMS_PATH, self.share_items)
+        self.share_step0(password)
 
         return self.url_request(
             self.SHARE_URL,
             self.SHARE_PARAMS
         ).get_by_path(self.SHARE_GET_PATH)
 
+    def share_step0(self, password):
+        assert len(password) == 4, 'Error: the length of the password must be 4'
+        assert password.isalnum(), 'Error: the allowed are alphabets and numbers'
+        self.share_step1(password)
+
+    def share_step1(self, password):
+        self.SHARE_PARAMS.set_by_path(self.SHARE_PASSWORD_PATH, password)
+        self.SHARE_PARAMS.set_by_path(self.SHARE_ITEMS_PATH, self.share_items)
+
 
 class BaiduNetDisk(BaseNetDisk):
-    id: int
-    path: str
-    name: str
-    is_dir: bool
-
     BRAND = 'BaiduNetDisk'
 
     __GET_ID_PATH = ['fs_id']
@@ -302,11 +311,6 @@ class BaiduNetDiskRoot(BaseNetDiskRoot, BaiduNetDisk):
 
 
 class QuarkCloudDrive(BaseNetDisk):
-    id: str
-    path: str
-    name: str
-    is_dir: bool
-
     BRAND = 'QuarkCloudDrive'
 
     __GET_ID_PATH = ['fid']
@@ -391,3 +395,78 @@ class QuarkCloudDriveRoot(BaseNetDiskRoot, QuarkCloudDrive):
                 'share_id': share_id
             }
         )['data']['share_url']
+
+
+class ALiYunDrive(BaseNetDisk):
+    BRAND = 'ALiYunDrive'
+
+    __GET_ID_PATH = ['file_id']
+    __GET_NAME_PATH = ['name']
+    __GET_IS_DIR_PATH = ['type']
+
+    GET_ITEMS_URL = 'https://api.aliyundrive.com/adrive/v3/file/list'
+    GET_ITEMS_PARAMS = {'jsonmask': 'items(file_id,name,type)'}
+    GET_ITEMS_PATH = ['items']
+
+    STATUS_CODE_PATH = ['code']
+    STATUS_CODE_HANDLE_DICT = {
+        None: 'pass',
+        'AccessTokenInvalid': Base.NetDiskAPIError.invalid_user,
+        'SharelinkCreateExceedDailyLimit': Base.NetDiskAPIError.shared_too_much
+    }
+
+    def __init__(self, object):
+        self.id = object.get_by_path(self.__GET_ID_PATH)
+        self.name = object.get_by_path(self.__GET_NAME_PATH)
+        self.is_dir = bool(object.get_by_path(self.__GET_IS_DIR_PATH, 'folder').replace('file', ''))
+        super().__init__(object)
+        self.RETRY_TIMES = 1
+
+    def get_items_step0(self) -> None:
+        with Base.Config('config.json') as config:
+            self.object_list = self.url_request(
+                self.GET_ITEMS_URL,
+                self.GET_ITEMS_PARAMS,
+                'post',
+                {
+                    'drive_id': config[self.BRAND]['drive_id'],
+                    'parent_file_id': self.id
+                }
+            ).get_by_path(self.GET_ITEMS_PATH)
+
+
+class ALiYunDriveRoot(BaseNetDiskRoot, ALiYunDrive):
+    SHARE_URL = 'https://api.aliyundrive.com/adrive/v2/share_link/create'
+    SHARE_GET_PATH = ['share_url']
+
+    def __init__(self):
+        super().__init__()
+        self.id = 'root'
+
+    def share_step0(self, password):
+        assert len(password) == 4, 'Error: the length of the password must be 4'
+        assert password.isalnum(), 'Error: the allowed are alphabets and numbers'
+
+    def share(self, password: str) -> str:
+        self.share_step0(password)
+
+        with Base.Config('config.json') as config:
+            return self.url_request(
+                self.SHARE_URL,
+                {},
+                'post',
+                {
+                    'drive_id': self.drive_id,
+                    'file_id_list': list(
+                        map(
+                            lambda a: a.id,
+                            self.share_items
+                        )
+                    )
+                }
+            ).get_by_path(self.SHARE_GET_PATH)
+
+    @property
+    def drive_id(self):
+        with Base.Config('config.json') as config:
+            return config[self.BRAND]['drive_id']

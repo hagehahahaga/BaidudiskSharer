@@ -1,13 +1,15 @@
-import Config
 import keyboard
 import win32api
 import win32gui
 import time
+import os
+import json
+from typing import Any
 
 
 class Tree(dict):
-    def get_by_path(self, path: list, els=None):
-        if els is None:
+    def get_by_path(self, path: list, els='dict') -> Any:
+        if els == 'dict':
             els = {}
 
         def recursion(path):
@@ -16,7 +18,7 @@ class Tree(dict):
                 return item_to_return
             try:
                 item_to_return = item_to_return[path.pop(0)]
-            except (KeyError, IndexError):
+            except (KeyError, IndexError, TypeError):
                 item_to_return = els
             return recursion(path)
 
@@ -33,23 +35,56 @@ class Tree(dict):
 
 
 class NetDiskAPIError(Exception):
-    brand: str
+    object = None
 
     def __init__(self, message: str, method):
         super().__init__(message)
         self.method = method
 
-    def error_show(self, brand: str):
-        self.brand = brand
-        print(f'Error on {self.brand}: {self.method.__name__}.', self)
+    def error_show(self, object):
+        self.object = object
+        print(f'Error on {self.object.BRAND}: {self.method.__name__}.', self)
         self.method(self)
 
     def invalid_user(self):
-        with Config.Config('config.json') as config:
-            config[self.brand] = input(f'Enter the cookie of the website {self.brand}:\n')
+        with Config('config.json') as config:
+            key = list(config[self.object.BRAND]["headers"].keys())[0]
+            config[self.object.BRAND]["headers"][key] = input(f'Enter the cookie of the website {self.object.BRAND}:\n')
+            match self.object.BRAND:
+                case 'ALiYunDrive':
+                    if not config[self.object.BRAND].get("drive_id"):
+                        config[self.object.BRAND]["drive_id"] = input(
+                            f'Enter the drive id of the website {self.object}:\n')
+
+    def shared_too_much(self):
+        self.object.retry_times = -1
 
     def unknown(self):
-        input('Press enter to retry.')
+        if input('Press enter to retry, else to exit.'):
+            exit()
+
+
+class Config(dict):
+    """
+    You can use it like a dict naturally by with it as an object
+    """
+
+    def __init__(self, file: str) -> None:
+        self.file = file
+
+        if not os.path.exists(self.file):
+            super().__init__()
+            return
+
+        with open(self.file, mode='r') as file:
+            super().__init__(json.load(file))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        with open(self.file, mode='w') as file:
+            json.dump(self, file, indent=2)
 
 
 def get_keyboard() -> str:

@@ -55,7 +55,8 @@ class __Main(NetDisks.BaseNetDisk):
     def get_items(self) -> set:
         return {
             NetDisks.BaiduNetDiskRoot(),
-            NetDisks.QuarkCloudDriveRoot()
+            NetDisks.QuarkCloudDriveRoot(),
+            NetDisks.ALiYunDriveRoot()
         }
 
 
